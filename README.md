@@ -1,6 +1,6 @@
 # Promatch
 
-Promatch ([click here for the paper](https://dl.acm.org/doi/abs/10.1145/3620666.3651339)) is an adaptive locality-aware greedy predecoder that extends real-time quantum error correction for surface codes of distances 11 and 13. This repository includes source code for simulating and evaluating our proposed designs in Promatch. It focuses on very low logical error rates using rare event simulation. You can use this repository to reproduce important findings from the paper, specifically in Section 6.1 (Table 2 and Table 3 on Logical Error Rates) and Section 6.2 (Figure 14 and Figure 15 on Error Rate Sensitivity Analysis up to 5×10−4).
+Promatch is an adaptive locality-aware greedy predecoder that extends real-time quantum error correction for surface codes of distances 11 and 13 ([click here for the paper](https://dl.acm.org/doi/abs/10.1145/3620666.3651339)). This repository includes source code for simulating and evaluating our proposed designs in Promatch. It focuses on very low logical error rates using rare event simulation. You can use this repository to reproduce important findings from the paper, specifically in Section 6.1 (Table 2 and Table 3 on Logical Error Rates) and Section 6.2 (Figure 14 and Figure 15 on Error Rate Sensitivity Analysis up to 5×10−4).
 
 ## Hardware dependencies
 Any computing clusters should be capable of executing the necessary experiments. For our evaluations, we utilized 120 cores. It is recommended to allocate 2GB of memory for each core.
