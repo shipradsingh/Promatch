@@ -57,3 +57,8 @@ set(DECODER_SOURCES
     ${DECODER_SOURCES}
     src/union_find_decoder.cpp
 )
+
+# Add util include directory
+set(UTIL_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/util)
+target_include_directories(quarch PUBLIC ${UTIL_INCLUDE_DIR})
+target_include_directories(promatch PRIVATE ${UTIL_INCLUDE_DIR})

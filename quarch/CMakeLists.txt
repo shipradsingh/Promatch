@@ -38,6 +38,8 @@ find_package(MPI REQUIRED)
 
 # Add include directory to include path.
 target_include_directories(quarch PUBLIC "include" ${MPI_INCLUDE_PATH})
+target_include_directories(quarch PUBLIC ${UTIL_INCLUDE_DIR})
+target_include_directories(quarch PUBLIC ${CMAKE_SOURCE_DIR})
 # Link OpenMP to Quarch
 # Add Stim to Quarch.
 add_subdirectory(stim)
@@ -50,3 +52,7 @@ target_link_libraries(quarch libblossom5)
 #target_link_libraries(quarch dramsim3)
 
 target_link_libraries(quarch ${MPI_CXX_LIBRARIES})
+
+# Test executable
+add_executable(test_union_find test/test_union_find.cpp)
+target_link_libraries(test_union_find quarch libstim)
