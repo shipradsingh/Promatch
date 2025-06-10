@@ -52,3 +52,8 @@ target_link_libraries(promatch PRIVATE ${MPI_CXX_LIBRARIES})
 # add_custom_target(run
 #   COMMAND mpirun -np ${MPIEXEC_NUMPROC_FLAG} ${MPIEXEC_PREFLAGS} ${CMAKE_CURRENT_BINARY_DIR}/promatch ${MPIEXEC_POSTFLAGS} ${MPIEXEC_NUMPROC_FLAG}
 #   DEPENDS nfd)
+
+set(DECODER_SOURCES
+    ${DECODER_SOURCES}
+    src/union_find_decoder.cpp
+)

@@ -607,7 +607,7 @@ fp_t physcial_error, fp_t meas_er, bool print_logs, bool adding_boundry){
 
            // if(world_rank == 0 ){
                  // std::cout << "k: " << k<< ":"<< n_decoder_logcial_error[k]<<", "<<buffer.size()<< " " <<binomial_probability(k, simulator.number_of_events, ((fp_t)simulator.return_probab_sum()/simulator.number_of_events))<<std::endl;//qpd::print_syndrome(syndrome);
-		
+        
             //}
             for(auto syndrome : buffer){
             //syndrome = buffer[s];
@@ -942,6 +942,192 @@ fp_t physcial_error, fp_t meas_er, uint64_t min_k, uint64_t max_k, uint64_t SHOT
 
     delete decoder;     
 
+}
+
+
+void bb_union_find_ler_calc(uint64_t max_shot, uint distance, 
+    fp_t physical_error, fp_t meas_er, uint64_t min_k, uint64_t max_k, bool& print_time, uint round_n, 
+    bool save_syndromes, std::string syndrome_folder_name, uint64_t hshots_replc, uint64_t lshots_rplac) {
+
+    // Safety and optimization parameters
+    const uint64_t MAX_ITERATIONS = 1000;
+    uint64_t iteration_count = 0;
+    uint64_t SHOTS_PER_BATCH = 1'000'000;
+    
+    // MPI setup
+    int world_size, world_rank;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    uint round = 0;
+    
+    // Informational output
+    if(world_rank == 0){
+        std::cout << "round#" << round_n << " UnionFind Decoder" << std::endl;
+    }
+    
+    // Set up syndrome directory for saving
+    if (world_rank == 0 && save_syndromes) {
+        std::cout << "Saving syndromes to: " << syndrome_folder_name << std::endl;
+        if (opendir(syndrome_folder_name.c_str()) == NULL) {
+            if (mkdir(syndrome_folder_name.c_str(), 0777) == 0) {
+                std::cout << "Directory created successfully" << std::endl;
+            } else {
+                std::cerr << "Failed to create directory: " << syndrome_folder_name << std::endl;
+                save_syndromes = false; // Disable saving if directory creation fails
+            }
+        } else {
+            std::cout << "Directory already exists" << std::endl;
+        }
+    }
+    
+    // Broadcast save_syndromes status to all processes
+    MPI_Bcast(&save_syndromes, 1, MPI_C_BOOL, 0, MPI_COMM_WORLD);
+    
+    try {
+        // Build quantum circuit
+        const stim::Circuit circ = qrc::build_circuit(
+            distance,
+            0,
+            0,
+            true,
+            true,
+            false,
+            0,
+            distance,
+            physical_error,
+            0,
+            0,
+            0,
+            -1,
+            -1,
+            -1,
+            meas_er
+        );
+        
+        if(world_rank == 0){
+            std::cout << "Circuit created, ";
+        }
+        
+        // Initialize simulator and decoder
+        bbsim::BucketBasedSim simulator(circ, max_k);
+        qrc::benchmark::StatisticalResult statres;
+        
+        // Create UnionFind decoder
+        std::unique_ptr<qrc::Decoder> decoder(new qrc::UFDecoder(circ));
+        
+        // Random number generator setup with proper seeding
+        std::mt19937_64 rng(world_size * round_n + world_rank);
+        
+        // Prepare for syndrome storage
+        std::vector<std::vector<std::vector<uint16_t>>> saved_hhw_syndromes(world_size);
+        std::vector<uint16_t> flipped_bits;
+        
+        // Set shot distribution based on expected logical error rate
+        fp_t expected_ler = 0.015 * pow((physical_error/0.0038), ((distance+1)/2));
+        simulator.set_shots_per_k(expected_ler, max_shot, true, hshots_replc, lshots_rplac);
+        
+        // Adjust max_k if some buckets have zero shots
+        uint64_t max_k_ = max_k;
+        for(uint k = 0; k < max_k-min_k; k++){
+            if(simulator.shots_per_k[k+min_k] == 0){
+                max_k_ = k+min_k;
+                break;
+            }
+        }
+        // Ensure we have at least one bucket to process
+        if(max_k_ <= min_k) {
+            max_k_ = min_k + 8; // Set a minimum number of buckets to process
+        }
+        max_k = max_k_;
+        
+        if(world_rank == 0){
+            std::cout << "Simulator set the number of shots." << std::endl;
+        }
+        
+        // Print simulation parameters
+        if(world_rank == 0){
+            print_time = true;
+            std::cout << "Distance = " << distance << " Expected LER = " << expected_ler 
+                    << " Max Shots per bucket = " << max_shot << " Physical Err = " << physical_error << std::endl;
+            for(uint x=0; x<max_k-min_k; x++){
+                if (simulator.shots_per_k[x+min_k] == 0) {
+                    simulator.shots_per_k[x+min_k] = 1'000'000; // Ensure no zero shots
+                }
+                std::cout << "K = " << x+min_k << " : Shots = " << simulator.shots_per_k[x+min_k] 
+                        << " , P = " << simulator.prob_k[x+min_k] << std::endl;
+            }
+        }
+        
+        // Process each bucket (k value)
+        fp_t prev_logical_error_rate = 0.0;
+        
+        for(uint k = 0; k < max_k-min_k && iteration_count < MAX_ITERATIONS; k++, iteration_count++){
+            uint64_t local_errors = 0;
+            uint64_t shots = simulator.shots_per_k[k+min_k] / world_size;
+            
+            // Distribute remaining shots to the last process
+            if (world_rank == world_size - 1) {
+                shots += simulator.shots_per_k[k+min_k] % world_size;
+            }
+            
+            // Process shots in batches
+            while(shots > 0){
+                uint64_t batch_size = std::min(shots, SHOTS_PER_BATCH);
+                shots -= batch_size;
+                
+                // Create and process syndromes
+                auto syndromes = simulator.create_syndromes(k+min_k, batch_size, rng, false);
+                
+                for(const auto& syndrome : syndromes){
+                    // Save high-weight syndromes if requested
+                    if(save_syndromes && 
+                    std::accumulate(syndrome.begin(), syndrome.begin()+circ.count_detectors(), 0) > distance){
+                        flipped_bits.clear();
+                        for(uint i = 0; i < syndrome.size(); i++){
+                            if(syndrome[i]){
+                                flipped_bits.push_back(i);
+                            }
+                        }
+                        saved_hhw_syndromes[world_rank].push_back(flipped_bits);
+                    }
+                    
+                    // Decode syndrome and count logical errors
+                    auto result = decoder->decode_error(syndrome);
+                    local_errors += result.is_logical_error ? 1 : 0;
+                }
+            }
+            
+            // Combine error counts across all processes
+            uint64_t fault_errors = 0;
+            MPI_Allreduce(&local_errors, &fault_errors, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
+            
+            // Report logical error rates
+            if (world_rank == 0 && simulator.shots_per_k[k+min_k] != 0) {
+                fp_t fault_error_rate = static_cast<fp_t>(fault_errors) / simulator.shots_per_k[k+min_k];
+                std::cout << "k=" << k+min_k << " (p=" << simulator.prob_k[k+min_k] 
+                        << "), logical error rate: " << fault_error_rate << std::endl;
+            }
+            
+            // Save accumulated syndromes if any
+            if(!saved_hhw_syndromes[world_rank].empty()) {
+                std::string file_name = syndrome_folder_name + syndrome_file_name("sgen", distance, physical_error,
+                                                                    meas_er, max_shot, world_rank, round);
+                qpd::write_vector_of_vectors(saved_hhw_syndromes[world_rank], file_name);
+                saved_hhw_syndromes[world_rank].clear();
+                round++;
+            }
+
+        }
+        
+        if(iteration_count >= MAX_ITERATIONS && world_rank == 0) {
+            std::cerr << "Warning: Maximum iterations reached (" << MAX_ITERATIONS << ")" << std::endl;
+        }
+    }
+    catch(const std::exception& e) {
+        if(world_rank == 0) {
+            std::cerr << "Error in bb_union_find_ler_calc: " << e.what() << std::endl;
+        }
+    }
 }
 
 void printing_samples_of_syndromes_and_matchings(uint64_t shots_per_k, uint distance, 
@@ -1293,7 +1479,7 @@ void test_finding_fast_group(uint64_t shots_per_k, uint distance,
     In this fucntion, we want to test our method that group vertices for fast matching.
     In this function, by A we mean group of vertices that are matched to their adjacent vertex by MWPM.
     And by               B we mean group of vertices that our method predict that will be matched with
-                         their adjacent vertices (Fast group).
+                        their adjacent vertices (Fast group).
     */
     uint64_t SHOTS_PER_BATCH = 1'000'000;
     int world_size, world_rank;

@@ -23,7 +23,9 @@ set(QUARCH_PROGRAM_FILES
     src/fleece.cpp
     src/fleece/lattice_graph.cpp
     src/fleece/rtanalysis.cpp
-    src/fleece/hldecoder.cpp)
+    src/fleece/hldecoder.cpp
+    # Union-Find
+    src/union_find_decoder.cpp)
 add_library(quarch ${QUARCH_PROGRAM_FILES})
 # Add compile options
 if(CMAKE_BUILD_TYPE MATCHES Release)

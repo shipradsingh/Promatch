@@ -3,7 +3,7 @@
 #include "syndrome_surgery.h"
 #include "bb_benchmark.h"
 
- #include <iostream>
+#include <iostream>
 #include <vector>
 #include <iostream>
 #include <vector>
@@ -191,6 +191,18 @@ int main(int argc, char** argv){
 
         //bb_ler_calculation(decoder_name, outputFile, max_shots, distance, physical_er, m_error, min_k, max_k, 5'000'000);
     }
+    else if (experiment_type.find("exp41") != std::string::npos) {
+        std::cout<<"STARTING EXPERIMENT 41" << std::endl;
+        fflush(stderr);
+        try {
+            bb_union_find_ler_calc(max_shots, distance, physical_er, m_error, min_k, max_k, print_time, round_n, 
+                save_syndrome, syndrome_folder_name, high_shots_replacement, low_shots_replacement);
+        } catch (const std::exception& e) {
+            fprintf(stderr, "ERROR IN UNION FIND: %s\n", e.what());
+        }
+        std::cout<<"FINISHED EXPERIMENT 41" << std::endl;
+        fflush(stderr);
+    }
     else if (experiment_type.find("exp39") != std::string::npos){
         testing_all(max_shots, distance, physical_er,
             m_error, min_k, max_k, threshold_scale, print_time, "MWPM", generalized, round_n, false , syndrome_folder_name, " ", high_shots_replacement, low_shots_replacement, important_bucket);
@@ -200,7 +212,7 @@ int main(int argc, char** argv){
         print_mwpm_mistakes( distance, physical_er, m_error, min_k, max_k, outputFile, generalized);
 
     }
-    if (experiment_type.find("exp37") != std::string::npos){
+    else if (experiment_type.find("exp37") != std::string::npos){
         PAG_synergies(max_shots, distance, physical_er,
             m_error, min_k, max_k, print_time, "MWPM", generalized, round_n, false , syndrome_folder_name, " ", high_shots_replacement, low_shots_replacement);
     }
@@ -214,7 +226,7 @@ int main(int argc, char** argv){
     }
     else if (experiment_type.find("exp34") != std::string::npos){
         bb_predecoder_ler_calc(max_shots, distance, physical_er, m_error, min_k, max_k, print_time, round_n, save_syndrome, syndrome_folder_name,
-                                 decoder_name, predecoder_name, high_shots_replacement, low_shots_replacement);
+                                decoder_name, predecoder_name, high_shots_replacement, low_shots_replacement);
 
         //bb_ler_calculation(decoder_name, outputFile, max_shots, distance, physical_er, m_error, min_k, max_k, 5'000'000);
     }
@@ -367,6 +379,10 @@ int main(int argc, char** argv){
         HW_remained_distr_v2(outputFile,  max_shots, distance,  physical_er, m_error);
     else if (experiment_type.find("exp9") != std::string::npos){
         high_distance_experiments(outputFile,  max_shots, distance,  physical_er, m_error);
+    }
+    else if (experiment_type.find("expUF") != std::string::npos) {
+        bb_union_find_ler_calc(max_shots, distance, physical_er, m_error, min_k, max_k, print_time, round_n, 
+                save_syndrome, syndrome_folder_name, high_shots_replacement, low_shots_replacement);
     }
 
     MPI_Finalize();
