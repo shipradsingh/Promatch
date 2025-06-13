@@ -89,12 +89,12 @@ namespace qrc {
         uint n_detectors;
         DecodingGraph decoding_graph;
         
-        // Clusters (as per documentation)
+        // Clusters
         std::vector<Cluster*> clusters;
         std::vector<Cluster*> vertex_to_cluster;
-        std::vector<bool> vertex_has_syndrome;
+        std::vector<uint> vertex_has_syndrome;
         
-        // Edge management (simplified)
+        // Edge management
         std::vector<EdgeSupport> edge_states;
         std::vector<std::pair<uint, uint>> edge_list;
         std::vector<double> edge_weights;
@@ -108,15 +108,18 @@ namespace qrc {
         // Setup methods
         void setup_boundaries_from_decoding_graph();
         void build_edge_mapping();
+        void print_spanning_tree(const std::map<uint, std::set<uint>>& adjacency, 
+                                   const std::set<uint>& remaining_vertices);
+        void debug_print_edge_observables();
         
-        // Algorithm phases (matching documentation)
+        // Algorithm phases
         void extract_vertex_syndrome(const std::vector<uint8_t>& detector_syndrome);
         void initialize_clusters();    // Phase 1: Create singleton clusters
         void grow_and_merge_clusters(); // Phase 2: Build spanning forest  
         void peel_clusters();          // Phase 3: Extract corrections
         
-        // Freezing logic (as documented)
-        bool cluster_touches_virtual_boundary(Cluster* cluster);
+        // Freezing logic
+        bool cluster_contains_virtual_boundary(Cluster* cluster);
         bool should_freeze_cluster(Cluster* cluster);
         void freeze_completed_clusters();
         bool is_cluster_frozen(Cluster* cluster);
@@ -130,7 +133,13 @@ namespace qrc {
         void debug_print_cluster_boundaries(Cluster* cluster);
         void debug_print_surface_code_layout();
         void debug_print_ascii_grid();
+        void debug_observable_mapping();
+        void debug_print_adjacency_matrix();
+        void debug_print_raw_graph(); 
+        void debug_print_raw_edge_frames();
         std::string vector_to_string(const std::vector<uint>& vec);
+        uint find_best_match_for_leaf(uint leaf, const std::map<uint, std::set<uint>>& adjacency,
+            const std::set<uint>& remaining_vertices);
         
     public:
         UFDecoder(const stim::Circuit& circuit);

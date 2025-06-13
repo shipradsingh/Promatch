@@ -15,7 +15,12 @@ namespace qrc {
         
         log.debug("Building Union-Find decoder using DecodingGraph...");
         decoding_graph = to_decoding_graph(circuit);
+        debug_print_raw_graph();
         
+        debug_print_raw_edge_frames();
+        
+        log.debug("Decoding graph built with ", decoding_graph.count_detectors(), " detectors.");
+        debug_print_raw_graph();
         log.debug("DECODER SETUP:");
         log.debug("  n_detectors = ", n_detectors);
         log.debug("  graph_vertices = ", decoding_graph.vertices().size());
@@ -26,48 +31,52 @@ namespace qrc {
         vertex_to_cluster.resize(decoding_graph.vertices().size(), nullptr);
     }
 
+    void UFDecoder::debug_print_adjacency_matrix() {
+        log.debug("=== Graph Adjacency Matrix ===");
+        auto vertices = decoding_graph.vertices();
+        
+        // Print direct connections between all vertices
+        for (uint v1 = 0; v1 < vertices.size(); v1++) {
+            std::string connections = "Vertex " + std::to_string(v1) + " connects to: ";
+            for (uint v2 = 0; v2 < vertices.size(); v2++) {
+                // Check if edge exists
+                bool connected = false;
+                for (uint e = 0; e < edge_list.size(); e++) {
+                    if ((edge_list[e].first == v1 && edge_list[e].second == v2) ||
+                        (edge_list[e].first == v2 && edge_list[e].second == v1)) {
+                        
+                        // Add edge weight and temporal info
+                        double weight = edge_weights[e];
+                        bool is_temporal = (weight == 0.0);
+                        
+                        connections += std::to_string(v2) + "(" + 
+                                    (is_temporal ? "T" : "S") + "), ";
+                        connected = true;
+                        break;
+                    }
+                }
+            }
+            log.debug(connections);
+        }
+    }
+
+
     void UFDecoder::setup_boundaries_from_decoding_graph() {
         log.debug("Setting up boundaries from DecodingGraph...");
         
         auto vertices = decoding_graph.vertices();
         vertex_boundaries.clear();
         
-        // Find coordinate boundaries for logical error detection
-        double min_x = std::numeric_limits<double>::max();
-        double max_x = std::numeric_limits<double>::lowest();
-        
-        // First pass: find min/max coordinates
-        for (uint i = 0; i < vertices.size(); i++) {
-            const auto& vertex = vertices[i];
-            if (vertex->coord.size() >= 1) {
-                double x = static_cast<double>(vertex->coord[0]);
-                min_x = std::min(min_x, x);
-                max_x = std::max(max_x, x);
-            }
-        }
-        
-        // Second pass: mark boundary vertices
+        // ONLY mark virtual boundary vertices
         for (uint i = 0; i < vertices.size(); i++) {
             const auto& vertex = vertices[i];
             
-            // Mark virtual boundary vertices
             if (vertex->detector == UINT_MAX) {
-                vertex_boundaries[i] = 0; // Virtual boundary
-                continue;
-            }
-            
-            // Mark coordinate boundaries
-            if (vertex->coord.size() >= 1) {
-                double x = static_cast<double>(vertex->coord[0]);
-                if (x == min_x) {
-                    vertex_boundaries[i] = 1; // Left boundary
-                } else if (x == max_x) {
-                    vertex_boundaries[i] = 2; // Right boundary
-                }
+                vertex_boundaries[i] = 0; // Virtual boundary only
             }
         }
         
-        log.debug("Boundary setup complete. Found ", vertex_boundaries.size(), " boundary vertices");
+        log.debug("Boundary setup complete. Found ", vertex_boundaries.size(), " virtual boundary vertices");
     }
 
     void UFDecoder::build_edge_mapping() {
@@ -104,16 +113,23 @@ namespace qrc {
                         bool is_temporal = (v2_ptr == decoding_graph.get_next_round(vertices[v1]));
                         if (is_temporal) {
                             edge_weight = 0.0;
+                            log.debug("TEMPORAL EDGE: ", v1, " -> ", v2,
+                                    " between vertices ", vertices[v1]->detector, " and ", vertices[v2]->detector);
                         }
                         
                         // Store observables for correction application
+                        // Always store with ordered vertex pairs
                         std::vector<uint> observables;
                         for (uint obs_id : edge->frames) {
                             observables.push_back(obs_id);
                         }
-                        edge_observables_map[{v1, v2}] = observables;
+                        uint min_v = std::min(v1, v2);
+                        uint max_v = std::max(v1, v2);
+                        edge_observables_map[{min_v, max_v}] = observables;
                     } else {
-                        edge_observables_map[{v1, v2}] = {};
+                        uint min_v = std::min(v1, v2);
+                        uint max_v = std::max(v1, v2);
+                        edge_observables_map[{min_v, max_v}] = {};
                     }
                     
                     edge_weights.push_back(edge_weight);
@@ -134,14 +150,43 @@ namespace qrc {
                 });
         
         log.debug("Built edge mapping: ", edge_list.size(), " edges");
+        // Print adjacency matrix for debugging
+        debug_print_adjacency_matrix();
+        debug_print_edge_observables();
+    }
+
+    void UFDecoder::debug_print_edge_observables() {
+        log.debug("=== EDGE OBSERVABLES MAP ===");
+        log.debug("Total edges with observable effects: ", edge_observables_map.size());
+        
+        for (const auto& [edge_pair, obs_vec] : edge_observables_map) {
+            uint v1 = edge_pair.first;
+            uint v2 = edge_pair.second;
+            
+            if (!obs_vec.empty()) {
+                std::string obs_str = "Observables: ";
+                for (uint obs_id : obs_vec) {
+                    obs_str += std::to_string(obs_id) + " ";
+                }
+                
+                log.debug("Edge ", v1, " <-> ", v2, " affects ", obs_vec.size(), 
+                        " observables: ", obs_str);
+            }
+        }
+        log.debug("============================");
     }
 
     DecoderShotResult UFDecoder::decode_error(const std::vector<uint8_t>& syndrome) {
         current_instance++;
-        
-        // Clear previous state
+        // Convert uint8_t vector to uint vector for logging
+        std::vector<uint> syndrome_uint(syndrome.begin(), syndrome.end());
+        std::string syndrome_str = vector_to_string(syndrome_uint);
+        log.info("Input Syndrome: ", syndrome_str);
+        // Clear previous state - delete ALL clusters from previous run
         for (auto cluster : clusters) {
-            delete cluster;
+            if (cluster != nullptr) {
+                delete cluster;
+            }
         }
         clusters.clear();
         cluster_id = 0;
@@ -152,14 +197,41 @@ namespace qrc {
         
         extract_vertex_syndrome(syndrome);
         
+        // PHASE TIMING START
+        auto total_start = std::chrono::high_resolution_clock::now();
+        
         // Phase 1: Initialize singleton clusters
+        auto phase1_start = std::chrono::high_resolution_clock::now();
         initialize_clusters();
+        auto phase1_end = std::chrono::high_resolution_clock::now();
         
         // Phase 2: Grow and merge clusters until frozen
+        auto phase2_start = std::chrono::high_resolution_clock::now();
         grow_and_merge_clusters();
+        auto phase2_end = std::chrono::high_resolution_clock::now();
         
         // Phase 3: Extract corrections from clusters
+        auto phase3_start = std::chrono::high_resolution_clock::now();
         peel_clusters();
+        auto phase3_end = std::chrono::high_resolution_clock::now();
+        
+        auto total_end = std::chrono::high_resolution_clock::now();
+        
+        // Calculate phase times in nanoseconds
+        auto phase1_time = std::chrono::duration_cast<std::chrono::nanoseconds>(phase1_end - phase1_start).count();
+        auto phase2_time = std::chrono::duration_cast<std::chrono::nanoseconds>(phase2_end - phase2_start).count();
+        auto phase3_time = std::chrono::duration_cast<std::chrono::nanoseconds>(phase3_end - phase3_start).count();
+        auto total_time = std::chrono::duration_cast<std::chrono::nanoseconds>(total_end - total_start).count();
+
+        uint syndrome_weight = std::accumulate(syndrome.begin(), syndrome.end(), 0);
+        
+        if (total_time > 100000 || syndrome_weight > 10) {  // Log if >100μs or high weight
+            log.debug("TIMING: HW=", syndrome_weight, 
+                    " | Init=", phase1_time, "ns", 
+                    " | Grow=", phase2_time, "ns", 
+                    " | Peel=", phase3_time, "ns", 
+                    " | Total=", total_time, "ns");
+        }
         
         // Generate final correction
         DecoderShotResult result;
@@ -170,9 +242,9 @@ namespace qrc {
                 apply_edge_correction(e, result.correction);
             }
         }
-        
-        result.is_logical_error = check_logical_error();
-        
+
+        result.is_logical_error = is_logical_error(result.correction, syndrome, n_detectors, circuit.count_observables());
+        log.info("Is logical error: ", result.is_logical_error? "TRUE" : "FALSE");
         return result;
     }
 
@@ -188,7 +260,7 @@ namespace qrc {
     }
 
     void UFDecoder::initialize_clusters() {
-        log.info("Phase 1: Initializing singleton clusters");
+        log.debug("Phase 1: Initializing singleton clusters");
         
         for (uint v = 0; v < vertex_has_syndrome.size(); v++) {
             if (vertex_has_syndrome[v]) {
@@ -203,19 +275,32 @@ namespace qrc {
             }
         }
         
-        log.info("Initialized ", clusters.size(), " singleton clusters");
+        log.debug("Initialized ", clusters.size(), " singleton clusters");
     }
 
     void UFDecoder::grow_and_merge_clusters() {
-        log.info("Phase 2: Growing and merging clusters");
+        log.debug("Phase 2: Growing and merging clusters");
         
         bool changes = true;
         int iteration = 0;
         
+        // Track growth radius for all clusters
+        int growth_radius = 1;
+        
+        // Track vertices by their distance from syndrome
+        std::map<uint, int> vertex_distance;
+        
+        // Initialize: syndrome vertices at distance 0
+        for (uint v = 0; v < vertex_has_syndrome.size(); v++) {
+            if (vertex_has_syndrome[v]) {
+                vertex_distance[v] = 0;
+            }
+        }
+        
         while (changes) {
             changes = false;
             iteration++;
-            log.debug("=== Growth iteration ", iteration, " ===");
+            log.debug("=== Growth iteration ", iteration, " (radius=", growth_radius, ") ===");
             
             // Check and freeze completed clusters
             freeze_completed_clusters();
@@ -237,7 +322,19 @@ namespace qrc {
                 break;
             }
             
-            // Process edges in weight order
+            // STEP 1: Find vertices at current radius to grow from
+            std::set<uint> vertices_at_current_radius;
+            for (const auto& [vertex, distance] : vertex_distance) {
+                if (distance == growth_radius - 1) {
+                    vertices_at_current_radius.insert(vertex);
+                }
+            }
+            
+            log.debug("Found ", vertices_at_current_radius.size(), " vertices at radius ", (growth_radius - 1));
+            
+            // STEP 2: Process growth edges
+            std::vector<std::pair<uint, uint>> merge_edges;
+            
             for (uint sorted_idx = 0; sorted_idx < sorted_edges.size(); sorted_idx++) {
                 uint e = sorted_edges[sorted_idx];
                 
@@ -253,66 +350,120 @@ namespace qrc {
                     continue;
                 }
                 
-                // Case 1: One endpoint has cluster, other is free -> grow cluster
+                // Case 1: Growth - one vertex has cluster, other is free
                 if ((c1 && !c2) || (!c1 && c2)) {
                     Cluster* active_cluster = c1 ? c1 : c2;
-                    uint free_vertex = c1 ? v2 : v1;
+                    uint cluster_vertex = c1 ? v1 : v2;  // Vertex already in cluster
+                    uint free_vertex = c1 ? v2 : v1;     // Vertex to add
                     
-                    if (!is_cluster_frozen(active_cluster)) {
+                    // STRICT RADIUS: Only grow from vertices at exactly (radius-1)
+                    bool is_radius_vertex = vertices_at_current_radius.count(cluster_vertex) > 0;
+                    
+                    if (is_radius_vertex && !is_cluster_frozen(active_cluster)) {
                         cluster_add_vertex(active_cluster, free_vertex);
-                        active_cluster->add_tree_edge(e);  // ← Track the edge
+                        active_cluster->add_tree_edge(e);
                         edge_states[e] = EdgeSupport::GROWN;
                         vertex_to_cluster[free_vertex] = active_cluster;
+                        vertex_distance[free_vertex] = growth_radius;  // Set distance of new vertex
                         changes = true;
                         
-                        log.debug("Cluster ", active_cluster->id, " grew to vertex ", free_vertex);
+                        log.debug("Cluster ", active_cluster->id, " grew from vertex ", 
+                                 cluster_vertex, " to vertex ", free_vertex, " (radius=", growth_radius, ")");
                     }
                 }
-                // Case 2: Both endpoints have different clusters -> merge
+                // Case 2: Potential merge - both vertices have different clusters
                 else if (c1 && c2 && c1->find() != c2->find()) {
-                    if (!is_cluster_frozen(c1) && !is_cluster_frozen(c2)) {
-                        Cluster* root1 = c1->find();
-                        Cluster* root2 = c2->find();
-                        
-                        log.debug("Merging clusters ", root1->id, " (parity=", root1->parity, 
-                                ") and ", root2->id, " (parity=", root2->parity, ")");
-                        
-                        // IMPORTANT: Merge tree edges from root2 into root1
-                        for (uint edge_id : root2->tree_edges) {
-                            root1->tree_edges.push_back(edge_id);
-                        }
-                        
-                        // Merge parity and union
-                        root1->parity = root1->parity ^ root2->parity;
-                        root1->union_with(root2);
-                        root1->add_tree_edge(e);  // Add the merging edge
-                        
-                        // IMPORTANT: Remove root2 from clusters vector
-                        auto it = std::find(clusters.begin(), clusters.end(), root2);
-                        if (it != clusters.end()) {
-                            clusters.erase(it);
-                        }
-                        
-                        // IMPORTANT: Delete root2 - UNCOMMENT THIS LINE:
-                        delete root2;  // ← This is the fix!
-                        root2 = nullptr;
-                        
-                        // Update vertex mappings to point to final root
-                        Cluster* final_root = root1->find();
-                        for (uint v : final_root->vertices) {
-                            vertex_to_cluster[v] = final_root;
-                        }
-                        
-                        edge_states[e] = EdgeSupport::GROWN;
-                        changes = true;
-                        
-                        log.debug("Merged result: cluster ", final_root->id, " parity=", final_root->parity);
-                        log.debug("Removed cluster ", root2->id, " from clusters vector");
+                    bool v1_at_radius = vertices_at_current_radius.count(v1) > 0;
+                    bool v2_at_radius = vertices_at_current_radius.count(v2) > 0;
+                    
+                    if ((v1_at_radius || v2_at_radius) && 
+                        !is_cluster_frozen(c1) && !is_cluster_frozen(c2)) {
+                        // Store edge for merging AFTER growth
+                        merge_edges.push_back({v1, v2});
                     }
                 }
             }
             
-            if (iteration > 10000000) {
+            // STEP 3: Process merges AFTER growth
+            for (auto& merge_pair : merge_edges) {
+                uint v1 = merge_pair.first;
+                uint v2 = merge_pair.second;
+                
+                Cluster* c1 = vertex_to_cluster[v1];
+                Cluster* c2 = vertex_to_cluster[v2];
+                
+                if (c1 && c2 && c1->find() != c2->find() && 
+                    !is_cluster_frozen(c1) && !is_cluster_frozen(c2)) {
+                    
+                    Cluster* root1 = c1->find();
+                    Cluster* root2 = c2->find();
+                    
+                    log.debug("Merging clusters ", root1->id, " (parity=", root1->parity, 
+                            ") and ", root2->id, " (parity=", root2->parity, ")");
+                    
+                    // Find merging edge
+                    uint merge_edge = UINT_MAX;
+                    for (uint e = 0; e < edge_list.size(); e++) {
+                        if (edge_states[e] == EdgeSupport::NONE) {
+                            uint ev1 = edge_list[e].first;
+                            uint ev2 = edge_list[e].second;
+                            if ((ev1 == v1 && ev2 == v2) || (ev1 == v2 && ev2 == v1)) {
+                                merge_edge = e;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (merge_edge != UINT_MAX) {
+                        log.debug("MERGING via edge ", v1, " -> ", v2, 
+                                " (temporal: ", (edge_weights[merge_edge] == 0.0 ? "YES" : "NO"), ")");
+                        // Save all vertices from both clusters
+                        std::vector<uint> all_vertices = root1->vertices;
+                        all_vertices.insert(all_vertices.end(), root2->vertices.begin(), root2->vertices.end());
+                        
+                        // Save both clusters' tree edges first
+                        std::vector<uint> combined_edges = root1->tree_edges;
+                        combined_edges.insert(combined_edges.end(), root2->tree_edges.begin(), root2->tree_edges.end());
+                        
+                        // Do union
+                        root1->union_with(root2);
+                        Cluster* final_root = root1->find();
+                        
+                        final_root->vertices = all_vertices;
+                        // Copy all edges to final root
+                        final_root->tree_edges = combined_edges;
+                        final_root->add_tree_edge(merge_edge);
+
+                        // THEN update parity on the final root
+                        final_root->parity = root1->parity ^ root2->parity;
+                        
+                        // Update all vertex mappings
+                        for (uint v : all_vertices) {
+                            vertex_to_cluster[v] = final_root;
+                        }
+                        
+                        // Clean up old clusters
+                        auto it1 = std::find(clusters.begin(), clusters.end(), root1);
+                        if (it1 != clusters.end() && root1 != final_root) {
+                            *it1 = nullptr;
+                        }
+                        auto it2 = std::find(clusters.begin(), clusters.end(), root2);
+                        if (it2 != clusters.end() && root2 != final_root) {
+                            *it2 = nullptr;
+                        }
+                        
+                        edge_states[merge_edge] = EdgeSupport::GROWN;
+                        changes = true;
+                        
+                        log.debug("Merged result: cluster ", final_root->id, " parity=", final_root->parity);
+                    }
+                }
+            }
+            
+            // Increment radius for next iteration
+            growth_radius++;
+            
+            if (iteration > 100) {
                 log.error("Growth failed to converge - force freezing remaining clusters");
                 for (auto& cluster : clusters) {
                     if (cluster && cluster->instance == current_instance) {
@@ -326,17 +477,60 @@ namespace qrc {
             }
         }
         
-        log.info("Growth complete after ", iteration, " iterations");
+        log.debug("Growth complete after ", iteration, " iterations");
+    }
+
+        uint UFDecoder::find_best_match_for_leaf(uint leaf, const std::map<uint, std::set<uint>>& adjacency,
+            const std::set<uint>& remaining_vertices) {
+        uint best_match = -1;
+        
+        // Priority 1: Regular neighbor with syndrome (non-boundary)
+        for (uint neighbor : adjacency.at(leaf)) {
+            if (remaining_vertices.count(neighbor) > 0 && 
+                vertex_boundaries.count(neighbor) == 0 && 
+                neighbor < vertex_has_syndrome.size() && 
+                vertex_has_syndrome[neighbor]) {
+                log.debug("  Found best match for leaf ", leaf, ": neighbor ", neighbor, " with syndrome");
+                return neighbor;  // Return immediately if highest priority match found
+            }
+        }
+        
+        // Priority 2: Any boundary neighbor
+        for (uint neighbor : adjacency.at(leaf)) {
+                if (remaining_vertices.count(neighbor) > 0 && 
+                    vertex_boundaries.count(neighbor) > 0) {
+                    log.debug("  Found boundary match for leaf ", leaf, ": neighbor ", neighbor);
+                    best_match = neighbor;
+                    break;
+                }
+        }
+        
+        // Priority 3: Any regular neighbor (non-boundary) (only if no regular match found)
+        if (best_match == -1) {
+            for (uint neighbor : adjacency.at(leaf)) {
+                if (remaining_vertices.count(neighbor) > 0 && 
+                    vertex_boundaries.count(neighbor) == 0) {
+                    log.debug("  Found regular match for leaf ", leaf, ": neighbor ", neighbor);
+                    best_match = neighbor;
+                    break;
+                }
+            }
+        }
+        
+        return best_match;
     }
 
     void UFDecoder::peel_clusters() {
-        log.info("Phase 3: Peeling clusters to recover the error pattern");
+        log.debug("Phase 3: Peeling clusters to recover the error pattern");
+        uint total_peel_iterations = 0;
+        uint clusters_peeled = 0;
         for (auto& cluster : clusters) {
-            if (cluster == nullptr) continue;
+            if (cluster == nullptr) continue;  // ← Skip nullified clusters
             Cluster* root = cluster->find();
             if (root->instance != current_instance) continue;
             
             log.debug("Peeling cluster ", root->id);
+            clusters_peeled++;
             
             // Build edge lookup table from stored tree edges
             std::map<std::pair<uint, uint>, uint> vertex_pair_to_edge;
@@ -359,9 +553,18 @@ namespace qrc {
             
             // Simple leaf peeling with direct edge access
             std::set<uint> remaining_vertices(root->vertices.begin(), root->vertices.end());
+            uint cluster_peel_iterations = 0;
+            log.debug("All remaining vertices: ");
+            std::string vertices_str = "";
+            for (uint v : remaining_vertices) {
+                vertices_str += std::to_string(v) + " ";
+            }
+            log.debug(vertices_str);
             
             while (remaining_vertices.size() > 1) {
-                // Find leaves
+                cluster_peel_iterations++;
+                // Find leaves - BUT EXCLUDE VIRTUAL BOUNDARIES
+                print_spanning_tree(adjacency, remaining_vertices);
                 std::vector<uint> leaves;
                 for (uint vertex_id : remaining_vertices) {
                     uint degree = 0;
@@ -370,69 +573,52 @@ namespace qrc {
                             degree++;
                         }
                     }
-                    if (degree == 1) {
+                    // Only consider non-boundary vertices as leaves
+                    if (degree == 1 && vertex_boundaries.count(vertex_id) == 0) {
                         leaves.push_back(vertex_id);
                     }
                 }
                 
                 if (leaves.empty()) break;
-                
+
+                log.debug("  Peel iteration ", cluster_peel_iterations, ": removing ", leaves.size(), " leaves");
                 // Process leaves
                 for (uint leaf : leaves) {
                     // Check syndrome and mark corrections
                     bool leaf_has_syndrome = (leaf < vertex_has_syndrome.size() && 
                                             vertex_has_syndrome[leaf]);
-                    
+
                     if (leaf_has_syndrome) {
-                        // Find neighbor and mark edge for correction
-                        for (uint neighbor : adjacency[leaf]) {
-                            if (remaining_vertices.count(neighbor) > 0) {
-                                auto edge_it = vertex_pair_to_edge.find({std::min(leaf, neighbor), std::max(leaf, neighbor)});
-                                if (edge_it != vertex_pair_to_edge.end()) {
-                                    edge_states[edge_it->second] = EdgeSupport::MATCHING;
+                        uint best_neighbor = find_best_match_for_leaf(leaf, adjacency, remaining_vertices);
+                        
+                        if (best_neighbor != -1) {
+                            auto edge_it = vertex_pair_to_edge.find({std::min(leaf, best_neighbor), std::max(leaf, best_neighbor)});
+                            if (edge_it != vertex_pair_to_edge.end()) {
+                                edge_states[edge_it->second] = EdgeSupport::MATCHING;
+
+                                if (vertex_boundaries.count(best_neighbor) > 0) {
+                                    log.debug("  Matching leaf ", leaf, " with boundary ", best_neighbor);
+                                } else {
+                                    log.debug("  Matching leaf ", leaf, " with neighbor ", best_neighbor);
                                 }
-                                break; // Only one neighbor for leaf
+                            }
+                            if (vertex_boundaries.count(best_neighbor) == 0) {
+                                vertex_has_syndrome[best_neighbor] ^= 1;   // flip parent
                             }
                         }
                     }
-                    
+
                     // Remove leaf REGARDLESS of syndrome status
                     remaining_vertices.erase(leaf);  // ← Move this outside the if statement
                 }
             }
+
+            total_peel_iterations += cluster_peel_iterations;
+            log.debug("Cluster ", root->id, " peeled in ", cluster_peel_iterations, " iterations");
         }
+        log.debug("Peeling complete: ", clusters_peeled, " clusters, ", total_peel_iterations, " total iterations");
     }
     
-    bool UFDecoder::cluster_touches_virtual_boundary(Cluster* cluster) {
-        auto vertices = decoding_graph.vertices();
-        
-        for (uint vertex_id : cluster->vertices) {
-            if (vertex_id >= vertices.size()) continue;
-            
-            // Check if vertex is virtual boundary
-            if (vertices[vertex_id]->detector == UINT_MAX) {
-                return true;
-            }
-            
-            // Check adjacency to virtual boundary
-            auto adj_list = decoding_graph.adjacency_list(vertices[vertex_id]);
-            for (auto adj : adj_list) {
-                if (adj->detector == UINT_MAX) {
-                    return true;
-                }
-            }
-            
-            // Check coordinate boundaries
-            auto it = vertex_boundaries.find(vertex_id);
-            if (it != vertex_boundaries.end()) {
-                return true;  // Any boundary contact triggers freezing
-            }
-        }
-        
-        return false;
-    }
-
-    // Freezing logic as documented
     bool UFDecoder::should_freeze_cluster(Cluster* cluster) {
         Cluster* root = cluster->find();
         
@@ -441,17 +627,29 @@ namespace qrc {
             return true;
         }
         
-        // Freeze condition 2: Touches virtual boundary
-        if (cluster_touches_virtual_boundary(root)) {
+        // Freeze condition 2: Odd parity + CONTAINS virtual boundary vertex
+        if (root->parity % 2 == 1 && cluster_contains_virtual_boundary(root)) {
             return true;
         }
         
+        // Allow odd parity clusters to keep growing if they don't contain virtual boundary
+        return false;
+    }
+
+    bool UFDecoder::cluster_contains_virtual_boundary(Cluster* cluster) {
+        // ONLY return true if cluster CONTAINS virtual boundary vertices
+        for (uint vertex_id : cluster->vertices) {
+            auto it = vertex_boundaries.find(vertex_id);
+            if (it != vertex_boundaries.end() && it->second == 0) {
+                return true; // Virtual boundary vertex is IN the cluster
+            }
+        }
         return false;
     }
 
     void UFDecoder::freeze_completed_clusters() {
         for (auto& cluster : clusters) {
-            if (cluster == nullptr) continue;
+            if (cluster == nullptr) continue;  // ← Skip nullified clusters
             
             Cluster* root = cluster->find();
             if (root->instance != current_instance || root->is_frozen) continue;
@@ -477,72 +675,110 @@ namespace qrc {
         vertex_to_cluster[vertex_id] = cluster;
     }
 
+    void UFDecoder::debug_observable_mapping() {
+        log.debug("=== OBSERVABLE 0 MAPPING DEBUG ===");
+        
+        int edges_affecting_obs0 = 0;
+        
+        for (auto& [edge_pair, obs_vector] : edge_observables_map) {
+            uint v1 = edge_pair.first, v2 = edge_pair.second;
+            
+            // Check if this edge affects Observable 0
+            bool affects_obs0 = false;
+            for (uint obs_id : obs_vector) {
+                if (obs_id == 0) {
+                    affects_obs0 = true;
+                    break;
+                }
+            }
+            
+            if (affects_obs0) {
+                edges_affecting_obs0++;
+                log.debug("Edge (", v1, "→", v2, ") affects Observable 0");
+                
+                // Check if this edge is being used for correction
+                auto edge_it = std::find(edge_list.begin(), edge_list.end(), std::make_pair(v1, v2));
+                if (edge_it != edge_list.end()) {
+                    uint edge_id = edge_it - edge_list.begin();
+                    if (edge_states[edge_id] == EdgeSupport::MATCHING) {
+                        log.debug("     This edge is ACTIVE in correction!");
+                    }
+                }
+            }
+        }
+        
+        log.debug("Total edges affecting Observable 0: ", edges_affecting_obs0);
+        log.debug("Circuit observables: ", circuit.count_observables());
+        
+        if (circuit.count_observables() == 1) {
+            log.debug("     WARNING: Observable 0 is likely the LOGICAL operator!");
+            log.debug("     Corrections should NOT flip logical operators!");
+        }
+    }
+
     bool UFDecoder::check_logical_error() {
-        log.debug("=== LOGICAL ERROR DETECTION ===");
+        log.debug("=== LOGICAL ERROR DETECTION (Observable-based) ===");
         
-        // Print overall layout once
-        debug_print_surface_code_layout();
-        debug_print_ascii_grid();
+        debug_observable_mapping();
         
-        bool logical_error_found = false;
+        // Generate correction from matching edges
+        std::vector<uint8_t> correction(circuit.count_observables(), 0);
         
+        for (uint e = 0; e < edge_states.size(); e++) {
+            if (edge_states[e] == EdgeSupport::MATCHING) {
+                apply_edge_correction(e, correction);
+            }
+        }
+        
+        // Check if any observable is affected (simplified logical error check)
+        bool logical_error = false;
+        for (uint obs = 0; obs < correction.size(); obs++) {
+            if (correction[obs] == 1) {
+                logical_error = true;
+                log.debug("Observable ", obs, " affected by correction");
+                break;
+            }
+        }
+        
+        // Additional check: isolated odd-parity clusters
         for (auto& cluster : clusters) {
             if (cluster == nullptr) continue;
             Cluster* root = cluster->find();
             
-            log.debug("\n--- Analyzing Cluster ", root->id, " ---");
-            debug_print_cluster_boundaries(root);
-            
-            // Only odd-parity clusters can cause logical errors
-            if (root->parity % 2 == 0) {
-                log.debug("  SKIP: Even parity cluster cannot cause logical error");
-                continue;
-            }
-            
-            log.debug("  CHECKING: Odd parity cluster for logical error...");
-            
-            // Check if cluster spans left-right boundaries (X logical error)
-            bool has_left = false, has_right = false;
-            
-            for (uint vertex_id : root->vertices) {
-                auto it = vertex_boundaries.find(vertex_id);
-                if (it != vertex_boundaries.end()) {
-                    if (it->second == 1) has_left = true;   // Left boundary
-                    if (it->second == 2) has_right = true;  // Right boundary
-                }
-            }
-            
-            if (has_left && has_right) {
-                log.debug("LOGICAL ERROR: Cluster spans left-right boundaries (X logical error)");
-                logical_error_found = true;
-            }
-            
-            // Check virtual boundary contact
-            if (cluster_touches_virtual_boundary(root)) {
-                log.debug("LOGICAL ERROR: Cluster touches virtual boundary");
-                logical_error_found = true;
-            }
-            
-            if (!logical_error_found) {
-                log.debug(" NO LOGICAL ERROR: Cluster is correctable");
+            // Odd parity cluster that doesn't contain virtual boundary = logical error
+            if (root->parity % 2 == 1 && !cluster_contains_virtual_boundary(root)) {
+                logical_error = true;
+                log.debug("Isolated odd-parity cluster ", root->id, " causes logical error");
             }
         }
         
-        log.debug("\n=== FINAL RESULT ===");
-        log.info("Logical error detected: ", (logical_error_found ? "YES" : "NO"));
-        log.debug("====================");
+        log.debug("Logical error detected: ", (logical_error ? "YES" : "NO"));
+        log.debug("=================================");
         
-        return logical_error_found;
+        return logical_error;
     }
 
     void UFDecoder::apply_edge_correction(uint edge_id, std::vector<uint8_t>& correction) {
         if (edge_id >= edge_list.size()) return;
         
+        // Get vertices and ensure proper ordering
         uint v1 = edge_list[edge_id].first;
         uint v2 = edge_list[edge_id].second;
+        uint min_v = std::min(v1, v2);
+        uint max_v = std::max(v1, v2);
         
-        auto it = edge_observables_map.find({v1, v2});
+        // Look up with consistent ordering
+        auto it = edge_observables_map.find({min_v, max_v});
         if (it != edge_observables_map.end()) {
+            // Add debug log here
+            if (!it->second.empty()) {
+                std::string obs_str = "";
+                for (uint obs_id : it->second) {
+                    obs_str += std::to_string(obs_id) + " ";
+                }
+                log.debug("Correction edge ", v1, " <-> ", v2, " flips observables: ", obs_str);
+            }
+            
             for (uint obs_id : it->second) {
                 if (obs_id < correction.size()) {
                     correction[obs_id] ^= 1;
@@ -552,237 +788,54 @@ namespace qrc {
     }
 
     void UFDecoder::debug_print_cluster_boundaries(Cluster* cluster) {
-        log.debug("=== Cluster ", cluster->id, " Boundary Analysis ===");
-        log.debug("Vertices: [", cluster->vertices.size(), " total]");
+        log.debug("=== Cluster ", cluster->id, " Analysis ===");
+        log.debug("Vertices: ", cluster->vertices.size());
+        log.debug("Parity: ", cluster->parity, " (", (cluster->parity % 2 == 0 ? "EVEN" : "ODD"), ")");
         
-        bool has_left = false, has_right = false, has_virtual = false;
-        std::vector<uint> left_vertices, right_vertices, virtual_vertices, regular_vertices;
+        // Only check for virtual boundaries
+        bool has_virtual = cluster_contains_virtual_boundary(cluster);
+        log.debug("Contains virtual boundary: ", has_virtual);
         
-        for (uint vertex_id : cluster->vertices) {
-            auto it = vertex_boundaries.find(vertex_id);
-            if (it != vertex_boundaries.end()) {
-                switch (it->second) {
-                    case 0: 
-                        virtual_vertices.push_back(vertex_id);
-                        has_virtual = true;
-                        break;
-                    case 1: 
-                        left_vertices.push_back(vertex_id);
-                        has_left = true;
-                        break;
-                    case 2: 
-                        right_vertices.push_back(vertex_id);
-                        has_right = true;
-                        break;
-                }
-            } else {
-                regular_vertices.push_back(vertex_id);
-            }
+        // Determine correctability
+        if (cluster->parity % 2 == 0) {
+            log.debug("Status: CORRECTABLE (even parity)");
+        } else if (has_virtual) {
+            log.debug("Status: CORRECTABLE (odd parity + virtual discharge)");
+        } else {
+            log.debug("Status: LOGICAL ERROR (isolated odd parity)");
         }
-        
-        log.debug("  Left boundary vertices: ", left_vertices.size(), " -> ", vector_to_string(left_vertices));
-        log.debug("  Right boundary vertices: ", right_vertices.size(), " -> ", vector_to_string(right_vertices));
-        log.debug("  Virtual boundary vertices: ", virtual_vertices.size(), " -> ", vector_to_string(virtual_vertices));
-        log.debug("  Regular vertices: ", regular_vertices.size(), " -> ", vector_to_string(regular_vertices));
-        
-        log.debug("  Boundary spans: Left=", has_left, ", Right=", has_right, ", Virtual=", has_virtual);
-        log.debug("  Parity: ", cluster->parity, " (", (cluster->parity % 2 == 0 ? "EVEN" : "ODD"), ")");
-        
-        // Determine logical error status
-        bool spans_boundaries = has_left && has_right;
-        bool touches_virtual = has_virtual;
-        bool should_be_logical = (cluster->parity % 2 == 1) && (spans_boundaries || touches_virtual);
-        
-        log.debug("  LOGICAL ERROR PREDICTION: ", (should_be_logical ? "YES" : "NO"));
-        log.debug("    Reason: parity=", cluster->parity % 2, ", spans=", spans_boundaries, ", virtual=", touches_virtual);
     }
 
     void UFDecoder::debug_print_surface_code_layout() {
         log.debug("=== Surface Code Layout Analysis ===");
         auto vertices = decoding_graph.vertices();
         
-        // Find physical coordinate ranges first
-        double min_x = 1e6, max_x = -1e6, min_y = 1e6, max_y = -1e6;
-        int physical_count = 0;
-        
+        int virtual_count = 0, physical_count = 0;
         for (uint i = 0; i < vertices.size(); i++) {
-            if (vertices[i]->coord.size() >= 2) {
-                double x = vertices[i]->coord[0];
-                double y = vertices[i]->coord[1];
-                
-                // Skip virtual boundary coordinates (very large values)
-                if (x > 1e6 || y > 1e6) {
-                    continue;
-                }
-                
-                min_x = std::min(min_x, x); max_x = std::max(max_x, x);
-                min_y = std::min(min_y, y); max_y = std::max(max_y, y);
+            if (vertices[i]->detector == UINT_MAX) {
+                virtual_count++;
+            } else {
                 physical_count++;
             }
         }
         
-        log.debug("Physical coordinate ranges: X=[", min_x, ", ", max_x, "], Y=[", min_y, ", ", max_y, "]");
-        log.debug("Total vertices: ", vertices.size(), " (", physical_count, " physical, ", 
-                  vertices.size() - physical_count, " virtual)");
-        log.debug("Boundary vertices: ", vertex_boundaries.size());
-        
-        // Print boundary summary with virtual positioning info
-        int virtual_count = 0, left_count = 0, right_count = 0;
-        for (auto& [vertex_id, boundary_type] : vertex_boundaries) {
-            switch (boundary_type) {
-                case 0: virtual_count++; break;
-                case 1: left_count++; break;
-                case 2: right_count++; break;
-            }
-        }
-        
-        log.debug("Boundary distribution: Virtual=", virtual_count, ", Left=", left_count, ", Right=", right_count);
+        log.debug("Total vertices: ", vertices.size(), " (", physical_count, " physical, ", virtual_count, " virtual)");
+        log.debug("Virtual boundary vertices: ", vertex_boundaries.size());
     }
 
     void UFDecoder::debug_print_ascii_grid() {
-        log.debug("=== ASCII Grid Visualization ===");
-        auto vertices = decoding_graph.vertices();
+        log.debug("=== Syndrome Pattern ===");
         
-        std::map<std::pair<int, int>, char> grid;
-        std::map<std::pair<int, int>, uint> grid_vertex_id;
-        
-        // First pass: find physical coordinate bounds
-        int min_x = 100, max_x = -100, min_y = 100, max_y = -100;
-        
-        for (uint i = 0; i < vertices.size(); i++) {
-            if (vertices[i]->coord.size() >= 2) {
-                double raw_x = vertices[i]->coord[0];
-                double raw_y = vertices[i]->coord[1];
-                
-                // Skip virtual boundary coordinates in range calculation
-                if (raw_x > 1e6 || raw_y > 1e6) {
-                    continue;
-                }
-                
-                int x = static_cast<int>(raw_x);
-                int y = static_cast<int>(raw_y);
-                
-                min_x = std::min(min_x, x); max_x = std::max(max_x, x);
-                min_y = std::min(min_y, y); max_y = std::max(max_y, y);
+        // Simple syndrome listing instead of complex grid
+        std::vector<uint> syndrome_vertices;
+        for (uint i = 0; i < vertex_has_syndrome.size(); i++) {
+            if (vertex_has_syndrome[i]) {
+                syndrome_vertices.push_back(i);
             }
         }
         
-        // Calculate safe virtual boundary positions
-        int virtual_left = min_x - 1;   // Place virtual boundaries 2 units outside
-        int virtual_right = max_x + 1;
-        int virtual_top = max_y + 1;
-        int virtual_bottom = min_y - 1;
-        
-        // Second pass: place all vertices including virtual boundaries
-        for (uint i = 0; i < vertices.size(); i++) {
-            if (vertices[i]->coord.size() >= 2) {
-                double raw_x = vertices[i]->coord[0];
-                double raw_y = vertices[i]->coord[1];
-                
-                int x, y;
-                bool is_virtual = false;
-                
-                // Handle virtual boundary coordinates
-                if (raw_x > 1e6 || raw_y > 1e6) {
-                    is_virtual = true;
-                    
-                    // Position virtual boundaries based on their connections or boundary type
-                    auto boundary_it = vertex_boundaries.find(i);
-                    if (boundary_it != vertex_boundaries.end() && boundary_it->second == 0) {
-                        // This is a virtual boundary vertex
-                        // Try to position it based on its connections to physical vertices
-                        auto adj_list = decoding_graph.adjacency_list(vertices[i]);
-                        
-                        if (!adj_list.empty()) {
-                            // Find the first physical neighbor to determine positioning
-                            for (auto adj : adj_list) {
-                                uint adj_idx = std::find(vertices.begin(), vertices.end(), adj) - vertices.begin();
-                                if (adj_idx < vertices.size() && adj->coord.size() >= 2) {
-                                    double adj_x = adj->coord[0];
-                                    double adj_y = adj->coord[1];
-                                    
-                                    if (adj_x < 1e6 && adj_y < 1e6) {
-                                        // Position virtual boundary relative to physical neighbor
-                                        int phys_x = static_cast<int>(adj_x);
-                                        int phys_y = static_cast<int>(adj_y);
-                                        
-                                        // Place virtual boundary outside the grid
-                                        if (phys_x == min_x) {
-                                            x = virtual_left; y = phys_y;
-                                        } else if (phys_x == max_x) {
-                                            x = virtual_right; y = phys_y;
-                                        } else if (phys_y == min_y) {
-                                            x = phys_x; y = virtual_bottom;
-                                        } else if (phys_y == max_y) {
-                                            x = phys_x; y = virtual_top;
-                                        } else {
-                                            // Default positioning
-                                            x = virtual_left; y = phys_y;
-                                        }
-                                        break;
-                                    }
-                                }
-                            }
-                        } else {
-                            // No connections found, use default position
-                            x = virtual_left;
-                            y = (min_y + max_y) / 2;
-                        }
-                    } else {
-                        // Skip other types of large coordinates
-                        continue;
-                    }
-                } else {
-                    // Physical coordinates
-                    x = static_cast<int>(raw_x);
-                    y = static_cast<int>(raw_y);
-                }
-                
-                // Determine symbol
-                char symbol = '.';
-                if (i < vertex_has_syndrome.size() && vertex_has_syndrome[i]) {
-                    symbol = 'S';  // Syndrome
-                } else if (vertex_boundaries.find(i) != vertex_boundaries.end()) {
-                    switch (vertex_boundaries[i]) {
-                        case 0: symbol = 'V'; break;  // Virtual
-                        case 1: symbol = 'L'; break;  // Left
-                        case 2: symbol = 'R'; break;  // Right
-                    }
-                }
-                
-                // Add virtual marker for repositioned virtual boundaries
-                if (is_virtual && symbol != 'V') {
-                    symbol = 'v';  // lowercase for repositioned virtual
-                }
-                
-                grid[{x, y}] = symbol;
-                grid_vertex_id[{x, y}] = i;
-            }
-        }
-        
-        // Update grid bounds to include virtual boundaries
-        int grid_min_x = std::min(min_x, virtual_left);
-        int grid_max_x = std::max(max_x, virtual_right);
-        int grid_min_y = std::min(min_y, virtual_bottom);
-        int grid_max_y = std::max(max_y, virtual_top);
-        
-        // Print grid
-        log.debug("Legend: S=Syndrome, V=Virtual, L=Left, R=Right, .=Regular, v=repositioned virtual");
-        log.debug("Physical bounds: X=[", min_x, ", ", max_x, "], Y=[", min_y, ", ", max_y, "]");
-        log.debug("Display bounds: X=[", grid_min_x, ", ", grid_max_x, "], Y=[", grid_min_y, ", ", grid_max_y, "]");
-        
-        for (int y = grid_max_y; y >= grid_min_y; y--) {
-            std::string row = "Y=" + std::to_string(y) + ": ";
-            for (int x = grid_min_x; x <= grid_max_x; x++) {
-                auto it = grid.find({x, y});
-                if (it != grid.end()) {
-                    row += it->second;
-                } else {
-                    row += ' ';
-                }
-            }
-            log.debug(row);
-        }
+        log.debug("Syndrome vertices: ", vector_to_string(syndrome_vertices));
+        log.debug("Virtual boundaries: ", vertex_boundaries.size());
     }
 
     std::string UFDecoder::vector_to_string(const std::vector<uint>& vec) {
@@ -797,4 +850,121 @@ namespace qrc {
         return result;
     }
 
+    void UFDecoder::debug_print_raw_graph() {
+        log.debug("=== RAW DECODING GRAPH STRUCTURE ===");
+        auto vertices = decoding_graph.vertices();
+        
+        log.debug("Total vertices: ", vertices.size());
+        
+        // Print vertex information
+        for (uint v_idx = 0; v_idx < vertices.size(); v_idx++) {
+            auto v = vertices[v_idx];
+            log.debug("Vertex ", v_idx, 
+                    " [Det=", (v->detector == UINT_MAX ? "virtual" : std::to_string(v->detector)), 
+                    ", Coords=", v->coord[0], ",", v->coord[1], ",", v->coord[2], "]");
+            
+            // Print raw adjacency from decoding graph
+            auto adj_list = decoding_graph.adjacency_list(v);
+            std::string adj_str = "  Raw adjacency: ";
+            
+            for (auto neighbor : adj_list) {
+                // Find index of neighbor in vertices list
+                uint n_idx = std::find(vertices.begin(), vertices.end(), neighbor) - vertices.begin();
+                adj_str += std::to_string(n_idx) + "(" + 
+                        (neighbor->detector == UINT_MAX ? "V" : std::to_string(neighbor->detector)) + "), ";
+            }
+            log.debug(adj_str);
+        }
+    }
+
+    void UFDecoder::print_spanning_tree(const std::map<uint, std::set<uint>>& adjacency, 
+                                   const std::set<uint>& remaining_vertices) {
+    log.debug("  === SPANNING TREE STRUCTURE (remaining vertices: ", remaining_vertices.size(), ") ===");
+    
+    // Build a more visual representation with indentation
+    std::map<uint, bool> visited;
+    
+    // Find a good root - preferably a non-leaf vertex
+    uint root = *remaining_vertices.begin();
+    for (uint v : remaining_vertices) {
+        uint degree = 0;
+        for (uint neighbor : adjacency.at(v)) {
+            if (remaining_vertices.count(neighbor) > 0) {
+                degree++;
+            }
+        }
+        if (degree > 1) {
+            root = v;
+            break;
+        }
+    }
+    
+    // Print tree using DFS
+    std::function<void(uint, int)> print_subtree = [&](uint vertex, int depth) {
+        visited[vertex] = true;
+        
+        // Build indentation
+        std::string indent(depth * 2, ' ');
+        
+        // Build node info
+        std::string node_info = std::to_string(vertex);
+        if (vertex_has_syndrome[vertex]) {
+            node_info += " [S]"; // Syndrome
+        }
+        if (vertex_boundaries.count(vertex) > 0) {
+            node_info += " [B]"; // Boundary
+        }
+        
+        log.debug(indent, "└─ ", node_info);
+        
+        // Process children
+        for (uint neighbor : adjacency.at(vertex)) {
+            if (remaining_vertices.count(neighbor) > 0 && !visited[neighbor]) {
+                print_subtree(neighbor, depth + 1);
+            }
+        }
+    };
+    
+    // Start DFS from root
+    print_subtree(root, 0);
+    log.debug("  ===============================");
+}
+
+void UFDecoder::debug_print_raw_edge_frames() {
+    log.debug("=== RAW EDGE FRAMES DEBUG ===");
+    auto vertices = decoding_graph.vertices();
+    
+    int edges_with_frames = 0;
+    
+    for (uint v1_idx = 0; v1_idx < vertices.size(); v1_idx++) {
+        auto v1 = vertices[v1_idx];
+        auto adj_list = decoding_graph.adjacency_list(v1);
+        
+        for (auto v2 : adj_list) {
+            uint v2_idx = std::find(vertices.begin(), vertices.end(), v2) - vertices.begin();
+            
+            // Only process each edge once
+            if (v1_idx < v2_idx) {
+                auto edge = decoding_graph.get_edge(v1, v2);
+                
+                if (edge != nullptr && !edge->frames.empty()) {
+                    edges_with_frames++;
+                    
+                    std::string frames_str = "";
+                    for (uint frame_id : edge->frames) {
+                        frames_str += std::to_string(frame_id) + " ";
+                    }
+                    
+                    log.debug("Edge ", v1_idx, " <-> ", v2_idx, 
+                              " [Det: ", (v1->detector == UINT_MAX ? "virtual" : std::to_string(v1->detector)),
+                              " <-> ", (v2->detector == UINT_MAX ? "virtual" : std::to_string(v2->detector)), "]",
+                              " has raw frames: ", frames_str);
+                }
+            }
+        }
+    }
+    
+    log.debug("Total edges with non-empty frames: ", edges_with_frames);
+    log.debug("===============================");
+}
 } // namespace qrc
