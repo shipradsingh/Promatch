@@ -12,6 +12,7 @@
 #include "experiments.h"
 #include <predecoder.h>
 #include <mwpm_decoder.h>
+#include <union_find_decoder.h>
 #include "syndrome_surgery.h"
 #include <astrea.h>
 #include <iomanip>
@@ -113,4 +114,7 @@ void MWPM_ler(uint64_t max_shot, uint distance,fp_t physcial_error, fp_t meas_er
     uint64_t max_k, bool& print_time, uint round_n = 0, bool save_syndromes = false, std::string syndrome_folder_name="dummyfolder",  
     std::string decoder_name="MWPM", uint64_t hshots_replc = 20'000'000, uint64_t lshots_rplac = 1'000'000, bool only_important_bucket = false);
 
+void bb_union_find_ler_calc(uint64_t max_shot, uint distance, 
+    fp_t physcial_error, fp_t meas_er, uint64_t min_k, uint64_t max_k, bool& print_time, uint round_n, 
+    bool save_syndromes, std::string syndrome_folder_name, uint64_t hshots_replc, uint64_t lshots_rplac);
 #endif

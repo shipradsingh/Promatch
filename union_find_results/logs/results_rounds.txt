@@ -1,0 +1,62 @@
+STARTING EXPERIMENT 41
+rounds#1 UnionFind Decoder
+Circuit created, Simulator set the number of shots.
+Distance = 5 Expected LER = 0.000273363 Max Shots per bucket = 100000 Physical Err = 0.001
+K = 2 : Shots = 1000000 , P = 0.00368201
+K = 3 : Shots = 1000000 , P = 0.000106717
+k=2 (p=0.00368201), logical error rate: 0.03808, average decoding time:  31747.9
+k=3 (p=0.000106717), logical error rate: 0.11665, average decoding time:  42248.1
+FINISHED EXPERIMENT 41
+
+Runtime: 0 hours, 1 minutes, 15 seconds
+
+
+STARTING EXPERIMENT 41
+rounds#5 UnionFind Decoder
+Circuit created, Simulator set the number of shots.
+Distance = 5 Expected LER = 0.000273363 Max Shots per bucket = 100000 Physical Err = 0.001
+K = 2 : Shots = 1000000 , P = 0.0247871
+K = 3 : Shots = 1000000 , P = 0.00206739
+K = 4 : Shots = 1000000 , P = 0.000128463
+k=2 (p=0.0247871), logical error rate: 0.009248, average decoding time:  45490.2
+k=3 (p=0.00206739), logical error rate: 0.036987, average decoding time:  36554.5
+k=4 (p=0.000128463), logical error rate: 0.069411, average decoding time:  46423.2
+FINISHED EXPERIMENT 41
+
+Runtime: 0 hours, 2 minutes, 10 seconds
+
+
+STARTING EXPERIMENT 41
+rounds#10 UnionFind Decoder
+Circuit created, Simulator set the number of shots.
+Distance = 5 Expected LER = 0.000273363 Max Shots per bucket = 100000 Physical Err = 0.001
+K = 2 : Shots = 1000000 , P = 0.0659253
+K = 3 : Shots = 1000000 , P = 0.00997319
+K = 4 : Shots = 1000000 , P = 0.00112754
+K = 5 : Shots = 1000000 , P = 0.000101618
+k=2 (p=0.0659253), logical error rate: 0.004505, average decoding time:  33523.1
+k=3 (p=0.00997319), logical error rate: 0.021144, average decoding time:  38560.6
+k=4 (p=0.00112754), logical error rate: 0.039195, average decoding time:  47978.3
+k=5 (p=0.000101618), logical error rate: 0.065746, average decoding time:  57750.9
+FINISHED EXPERIMENT 41
+
+Runtime: 0 hours, 3 minutes, 1 seconds
+
+
+STARTING EXPERIMENT 41
+rounds#20 UnionFind Decoder
+Circuit created, Simulator set the number of shots.
+Distance = 5 Expected LER = 0.000273363 Max Shots per bucket = 100000 Physical Err = 0.001
+K = 2 : Shots = 1000000 , P = 0.157151
+K = 3 : Shots = 1000000 , P = 0.0450984
+K = 4 : Shots = 1000000 , P = 0.00968878
+K = 5 : Shots = 1000000 , P = 0.00166215
+K = 6 : Shots = 1000000 , P = 0.000237186
+k=2 (p=0.157151), logical error rate: 0.002335, average decoding time:  35708.3
+k=3 (p=0.0450984), logical error rate: 0.011351, average decoding time:  44754.5
+k=4 (p=0.00968878), logical error rate: 0.020972, average decoding time:  54555.8
+k=5 (p=0.00166215), logical error rate: 0.036782, average decoding time:  64687.6
+k=6 (p=0.000237186), logical error rate: 0.052413, average decoding time:  98361.4
+FINISHED EXPERIMENT 41
+
+Runtime: 0 hours, 5 minutes, 5 seconds
