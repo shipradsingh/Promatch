@@ -1,5 +1,0 @@
-| Distance | Growth Iterations | Peel Iterations |
-| -------- | ----------------- | --------------- |
-| 3        | 2                 | 4               |
-| 5        | 2                 | 11              |
-| 7        | 2                 | 7               |
