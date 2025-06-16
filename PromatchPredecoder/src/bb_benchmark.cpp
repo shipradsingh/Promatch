@@ -962,7 +962,7 @@ void bb_union_find_ler_calc(uint64_t max_shot, uint distance,
     
     // Informational output
     if(world_rank == 0){
-        std::cout << "round#" << round_n << " UnionFind Decoder" << std::endl;
+        std::cout << "rounds#" << round_n << " UnionFind Decoder" << std::endl;
     }
     
     // Set up syndrome directory for saving
@@ -985,7 +985,7 @@ void bb_union_find_ler_calc(uint64_t max_shot, uint distance,
     
     try {
         // Build quantum circuit
-        const stim::Circuit circ = qrc::build_circuit(
+        const stim::Circuit circ = qrc::build_circuit_union_find(
             distance,
             0,
             0,
@@ -993,7 +993,7 @@ void bb_union_find_ler_calc(uint64_t max_shot, uint distance,
             true,
             false,
             0,
-            distance,
+            round_n,
             physical_error,
             0,
             0,
@@ -1023,8 +1023,8 @@ void bb_union_find_ler_calc(uint64_t max_shot, uint distance,
         std::vector<uint16_t> flipped_bits;
         
         // Set shot distribution based on expected logical error rate
-        fp_t expected_ler = 0.015 * pow((physical_error/0.0038), ((distance+1)/2));
-        simulator.set_shots_per_k(expected_ler, max_shot, true, hshots_replc, lshots_rplac);
+        fp_t mwpm_expected_ler = 0.03*pow((physical_error/0.0054), ((distance+1)/2));
+        simulator.set_shots_per_k(mwpm_expected_ler, max_shot, true, hshots_replc, lshots_rplac);
         
         // Adjust max_k if some buckets have zero shots
         uint64_t max_k_ = max_k;
@@ -1047,7 +1047,7 @@ void bb_union_find_ler_calc(uint64_t max_shot, uint distance,
         // Print simulation parameters
         if(world_rank == 0){
             print_time = true;
-            std::cout << "Distance = " << distance << " Expected LER = " << expected_ler 
+            std::cout << "Distance = " << distance << " MWPM LER (Expected) = " << mwpm_expected_ler 
                     << " Max Shots per bucket = " << max_shot << " Physical Err = " << physical_error << std::endl;
             for(uint x=0; x<max_k-min_k; x++){
                 if (simulator.shots_per_k[x+min_k] == 0) {
@@ -1060,6 +1060,7 @@ void bb_union_find_ler_calc(uint64_t max_shot, uint distance,
         
         // Process each bucket (k value)
         fp_t prev_logical_error_rate = 0.0;
+        fp_t weighted_logical_error_rate = 0.0;
         
         for(uint k = 0; k < max_k-min_k && iteration_count < MAX_ITERATIONS; k++, iteration_count++){
             uint64_t local_errors = 0;
@@ -1104,8 +1105,10 @@ void bb_union_find_ler_calc(uint64_t max_shot, uint distance,
             // Report logical error rates
             if (world_rank == 0 && simulator.shots_per_k[k+min_k] != 0) {
                 fp_t fault_error_rate = static_cast<fp_t>(fault_errors) / simulator.shots_per_k[k+min_k];
+
                 std::cout << "k=" << k+min_k << " (p=" << simulator.prob_k[k+min_k] 
                         << "), logical error rate: " << fault_error_rate << std::endl;
+                weighted_logical_error_rate += simulator.prob_k[k + min_k] * fault_error_rate;
             }
             
             // Save accumulated syndromes if any
@@ -1118,9 +1121,11 @@ void bb_union_find_ler_calc(uint64_t max_shot, uint distance,
             }
 
         }
-        
-        if(iteration_count >= MAX_ITERATIONS && world_rank == 0) {
-            std::cerr << "Warning: Maximum iterations reached (" << MAX_ITERATIONS << ")" << std::endl;
+        if (world_rank == 0) {
+            std::cout << "Weighted LER (across all buckets): " << weighted_logical_error_rate << std::endl;
+            if(iteration_count >= MAX_ITERATIONS) {
+                std::cerr << "Warning: Maximum iterations reached (" << MAX_ITERATIONS << ")" << std::endl;
+            }
         }
     }
     catch(const std::exception& e) {

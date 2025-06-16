@@ -8,13 +8,14 @@
 #include <functional>
 #include <map>
 #include <vector>
+#include <thread>
 
 using namespace std;
 
 namespace qrc {
 
     UFDecoder::UFDecoder(const stim::Circuit& circuit)
-        : Decoder(circuit), cluster_id(0), current_instance(0) {
+        : Decoder(circuit), cluster_id(0) {
         
         n_detectors = circuit.count_detectors();
         
@@ -115,7 +116,6 @@ namespace qrc {
     }
 
     DecoderShotResult UFDecoder::decode_error(const vector<uint8_t>& syndrome) {
-        current_instance++;
         // Convert uint8_t vector to uint vector for logging
         vector<uint> syndrome_uint(syndrome.begin(), syndrome.end());
         string syndrome_str = vector_to_string(syndrome_uint);
@@ -190,7 +190,7 @@ namespace qrc {
         
         for (uint v = 1; v < vertex_has_syndrome.size(); v++) {
             if (vertex_has_syndrome[v]) {
-                Cluster* cluster = new Cluster(cluster_id++, current_instance);
+                Cluster* cluster = new Cluster(cluster_id++);
                 cluster->parity = 0; 
                 cluster_add_vertex(cluster, v);
                 
@@ -206,7 +206,7 @@ namespace qrc {
         
         // Virtual boundary cluster
         if (vertex_boundaries.count(0) > 0) {
-            Cluster* boundary_cluster = new Cluster(cluster_id++, current_instance);
+            Cluster* boundary_cluster = new Cluster(cluster_id++);
             boundary_cluster->parity = 0;
             boundary_cluster->is_virtual_boundary = true;
             cluster_add_vertex(boundary_cluster, 0);
@@ -218,42 +218,52 @@ namespace qrc {
 
     void UFDecoder::grow_and_merge_clusters() {
         log.debug("Phase 2: Growing and merging clusters");
-        bool changes = true;
+        volatile bool changes = true;
         int iteration = 1;
-        double growth_unit = 0.5;  // Growth unit for each cluster
-        // initialize growth progress for all clusters; double-check;
+        double growth_unit = 0.5;
+        
+        // Initialize growth progress
         for (auto& cluster : clusters) {
-            if (cluster && cluster->instance == current_instance) {
+            if (cluster) {
                 for (uint v : cluster->vertices) {
-                    cluster->growth_progress[v] = 0.0;  // Initialize growth progress
+                    cluster->growth_progress[v] = 0.0;
                 }
             }
         }
+        
         while (changes && iteration < 1000) {
-            for (auto& cluster: clusters) {
-                if (!cluster || cluster->instance != current_instance || cluster->is_frozen || cluster->is_virtual_boundary) {
-                    continue;  // Skip frozen or virtual clusters
+            // Use index-based loop instead of range-based loop
+            for (size_t i = 0; i < clusters.size(); ++i) {
+                auto& cluster = clusters[i];
+                
+                if (!cluster || cluster->is_frozen || cluster->is_virtual_boundary) {
+                    continue;
                 }
+                
                 vector<uint> cluster_boundary = get_cluster_boundary(cluster);
                 log.debug("Cluster ", cluster->id, " boundary vertices: ", vector_to_string(cluster_boundary));
 
                 for (auto& v : cluster_boundary) {
                     if (vertex_to_cluster[v] == cluster) {
-                        cluster->growth_progress[v] += growth_unit;  // Apply growth unit
+                        cluster->growth_progress[v] += growth_unit;
                         log.debug("Cluster ", cluster->id, " vertex ", v, " growth progress: ", 
                                 cluster->growth_progress[v]);
                     }
                 }
+                
                 process_cluster_boundary(cluster);
-                Cluster* root = cluster->find();
                 freeze_completed_clusters();
+                
+                // After merge_clusters(), clusters vector might have changed size
+                // The index-based loop handles this gracefully
             }
-            // check if all clusters are frozen
+            
+            // Check if any clusters remain unfrozen
             changes = false;
-            iteration++;    
+            iteration++;
             for (auto& cluster : clusters) {
-                if (cluster && cluster->instance == current_instance && !cluster->is_frozen && !cluster->is_virtual_boundary) {
-                    changes = true;  // At least one cluster can still grow or merge
+                if (cluster && !cluster->is_frozen && !cluster->is_virtual_boundary) {
+                    changes = true;
                     break;
                 }
             }
@@ -395,7 +405,6 @@ namespace qrc {
             root1->tree_edges.push_back(e);
         }
         root1->tree_edges.push_back(edge_id);
-        root1->instance = current_instance;
         
         // Update properties
         root1->parity ^= root2->parity;
@@ -491,8 +500,6 @@ namespace qrc {
             if (cluster == nullptr)
                 continue;  // Skip nullified clusters
             Cluster* rootCluster = cluster->find();
-            if (rootCluster->instance != current_instance)
-                continue;
             
             log.debug("Peeling cluster ", rootCluster->id);
             clusters_peeled++;
@@ -602,8 +609,11 @@ namespace qrc {
     }
 
     bool UFDecoder::should_freeze_cluster(Cluster* cluster) {
-        Cluster* root = cluster->find();
-        return (root->parity % 2 == 0);
+        Cluster* root = cluster->find();        
+        // Freeze if: virtual boundary OR even parity OR already frozen
+        return (root->is_virtual_boundary || 
+                root->parity % 2 == 0 || 
+                root->is_frozen);
     }
 
     void UFDecoder::freeze_completed_clusters() {
@@ -612,7 +622,7 @@ namespace qrc {
             if (cluster == nullptr || cluster->is_virtual_boundary) continue;
             
             Cluster* root = cluster->find();
-            if (root->instance != current_instance || root->is_frozen) continue;
+            if (root->is_frozen) continue;
             
             if (should_freeze_cluster(root)) {
                 root->is_frozen = true;
@@ -623,7 +633,7 @@ namespace qrc {
 
     void UFDecoder::force_freeze_all_clusters() {
         for (auto& cluster : clusters) {
-            if (cluster && cluster->instance == current_instance) {
+            if (cluster) {
                 cluster->find()->is_frozen = true;
             }
         }

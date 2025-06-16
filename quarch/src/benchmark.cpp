@@ -480,4 +480,65 @@ build_circuit(
     return circ;
 }
 
+stim::Circuit
+build_circuit_union_find(
+    uint code_dist,
+    fp_t error_mean,
+    fp_t error_stddev,
+    bool is_memory_z,
+    bool is_rotated,
+    bool both_stabilizers,
+    uint8_t other_flags,
+    uint rounds,
+    fp_t clevel_error_mean,
+    fp_t clevel_error_stddev,
+    fp_t pauliplus_error_mean,
+    fp_t pauliplus_error_stddev,
+    fp_t round_dp_mean,
+    fp_t sq_dp_mean,
+    fp_t cx_dp_mean,
+    fp_t reset_flip_mean,
+    fp_t meas_flip_mean,
+    fp_t round_dp_stddev,
+    fp_t sq_dp_stddev,
+    fp_t cx_dp_stddev,
+    fp_t reset_flip_stddev,
+    fp_t meas_flip_stddev,
+    fp_t round_leak_mean,
+    fp_t clifford_leak_mean,
+    fp_t leak_transport_mean,
+    fp_t round_leak_stddev,
+    fp_t clifford_leak_stddev,
+    fp_t leak_transport_stddev)
+{
+    if (rounds == 0) {
+        rounds = code_dist;
+    }
+    std::string circ_type = (is_rotated ? "" : "un");
+    circ_type += "rotated_memory_";
+    circ_type += (is_memory_z ? "z" : "x");
+
+    stim::CircuitGenParameters params(rounds, code_dist, circ_type);
+    // Declare error rates.
+    params.before_round_data_depolarization = __CHS(error_mean, clevel_error_mean, round_dp_mean);
+    params.after_reset_flip_probability = __CHS(error_mean, clevel_error_mean, reset_flip_mean);
+    params.before_measure_flip_probability = __CHS(error_mean, clevel_error_mean, meas_flip_mean);
+
+    params.before_round_data_depolarization_stddev = __CHS(error_stddev, clevel_error_stddev, round_dp_stddev);
+    params.after_reset_flip_probability_stddev = __CHS(error_stddev, clevel_error_stddev, reset_flip_stddev);
+    params.before_measure_flip_probability_stddev = __CHS(error_stddev, clevel_error_stddev, meas_flip_stddev);
+
+    params.before_round_leakage_probability = __CHS(error_mean, pauliplus_error_mean, round_leak_mean);
+    
+    params.before_round_leakage_probability_stddev = __CHS(error_stddev, pauliplus_error_stddev, round_leak_stddev);
+
+    params.both_stabilizers = both_stabilizers;
+    params.swap_lru = other_flags & BC_FLAG_SWAP_LRU_V1;
+    params.swap_lru_with_no_swap = other_flags & BC_FLAG_SWAP_LRU_V2;
+    params.initial_state_is_basis_1 = other_flags & BC_FLAG_INVERT_STATE;
+
+    stim::Circuit circ = generate_surface_code_circuit(params).circuit;
+    return circ;
+}
+
 }  // qrc

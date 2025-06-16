@@ -1,0 +1,26 @@
+STARTING EXPERIMENT 41
+STARTING EXPERIMENT 41
+STARTING EXPERIMENT 41
+STARTING EXPERIMENT 41
+STARTING EXPERIMENT 41
+STARTING EXPERIMENT 41
+rounds#7 UnionFind Decoder
+Circuit created, Simulator set the number of shots.
+Distance = 7 MWPM LER (Expected) = 3.52814e-05 Max Shots per bucket = 10000000 Physical Err = 0.001
+K = 3 : Shots = 1000000 , P = 0.0248831
+K = 4 : Shots = 1000000 , P = 0.00409595
+K = 5 : Shots = 1000000 , P = 0.000538064
+K = 6 : Shots = 1000000 , P = 5.87585e-05
+k=3 (p=0.0248831), logical error rate: 0.001874
+k=4 (p=0.00409595), logical error rate: 0.003512
+k=5 (p=0.000538064), logical error rate: 0.008135
+k=6 (p=5.87585e-05), logical error rate: 0.01369
+Weighted LER (across all buckets): 6.61975e-05
+FINISHED EXPERIMENT 41
+FINISHED EXPERIMENT 41
+FINISHED EXPERIMENT 41
+FINISHED EXPERIMENT 41
+FINISHED EXPERIMENT 41
+FINISHED EXPERIMENT 41
+
+Runtime: 0 hours, 1 minutes, 35 seconds

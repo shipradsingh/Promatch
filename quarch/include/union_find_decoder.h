@@ -20,7 +20,6 @@ namespace qrc {
     // Simplified cluster structure matching documentation
     struct Cluster {
         uint id;
-        uint instance;
         uint parity;               // Number of defects in cluster (odd/even)
         std::vector<uint> vertices;
         std::vector<uint> tree_edges;  // Edges that form spanning tree
@@ -32,8 +31,8 @@ namespace qrc {
         
         std::map<uint, double> growth_progress;
 
-        Cluster(uint cluster_id, uint inst) 
-            : id(cluster_id), instance(inst), parity(0), is_frozen(false), 
+        Cluster(uint cluster_id) 
+            : id(cluster_id), parity(0), is_frozen(false), 
             parent(this), rank(0){}
         
         void add_vertex(uint vertex_id) {
